@@ -94,6 +94,7 @@ enum algos {
 	ALGO_LYRA2,       /* Lyra2RE */
 	ALGO_LYRA2REV2,   /* Lyra2REv2 (Vertcoin) */
 	ALGO_MYR_GR,      /* Myriad Groestl */
+	ALGO_M7M,         /* M7-M (Magi) */
 	ALGO_NIST5,       /* Nist5 */
 	ALGO_PENTABLAKE,  /* Pentablake */
 	ALGO_PLUCK,       /* Pluck (Supcoin) */
@@ -106,6 +107,7 @@ enum algos {
 	ALGO_SKEIN,       /* Skein */
 	ALGO_SKEIN2,      /* Double skein (Woodcoin) */
 	ALGO_S3,          /* S3 */
+	ALGO_VELVET,      /* VELVET */
 	ALGO_X11,         /* X11 */
 	ALGO_X13,         /* X13 */
 	ALGO_X14,         /* X14 */
@@ -138,6 +140,7 @@ static const char *algo_names[] = {
 	"lyra2re",
 	"lyra2rev2",
 	"myr-gr",
+	"m7m",
 	"nist5",
 	"pentablake",
 	"pluck",
@@ -150,6 +153,7 @@ static const char *algo_names[] = {
 	"skein",
 	"skein2",
 	"s3",
+	"velvet",
 	"x11",
 	"x13",
 	"x14",
@@ -277,6 +281,7 @@ Options:\n\
                           lyra2re      Lyra2RE\n\
                           lyra2rev2    Lyra2REv2 (Vertcoin)\n\
                           myr-gr       Myriad-Groestl\n\
+                          m7m          M7-M (Magicoin)\n\
                           neoscrypt    NeoScrypt(128, 2, 1)\n\
                           nist5        Nist5\n\
                           pluck        Pluck:128 (Supcoin)\n\
@@ -292,6 +297,7 @@ Options:\n\
                           skein        Skein+Sha (Skeincoin)\n\
                           skein2       Double Skein (Woodcoin)\n\
                           s3           S3\n\
+                          velvet       Fantom\n\
                           x11          X11\n\
                           x13          X13\n\
                           x14          X14\n\
@@ -554,10 +560,12 @@ static bool work_decode(const json_t *val, struct work *work)
 		goto err_out;
 	}
 
-	for (i = 0; i < adata_sz; i++)
-		work->data[i] = le32dec(work->data + i);
-	for (i = 0; i < atarget_sz; i++)
-		work->target[i] = le32dec(work->target + i);
+	if (opt_algo != ALGO_M7M && opt_algo != ALGO_VELVET) {
+		for (i = 0; i < adata_sz; i++)
+			work->data[i] = le32dec(work->data + i);
+		for (i = 0; i < atarget_sz; i++)
+			work->target[i] = le32dec(work->target + i);
+	}
 
 	if ((opt_showdiff || opt_max_diff > 0.) && !allow_mininginfo)
 		calc_network_diff(work);
@@ -1045,7 +1053,7 @@ static bool submit_upstream_work(CURL *curl, struct work *work)
 			le32enc(&ntime, work->data[17]);
 			le32enc(&nonce, work->data[19]);
 
-			if (opt_algo == ALGO_DROP || opt_algo == ALGO_NEOSCRYPT || opt_algo == ALGO_ZR5) {
+			if (opt_algo == ALGO_DROP || opt_algo == ALGO_M7M || opt_algo == ALGO_NEOSCRYPT || opt_algo == ALGO_ZR5) {
 				/* reversed */
 				be32enc(&ntime, work->data[17]);
 				be32enc(&nonce, work->data[19]);
@@ -1183,8 +1191,9 @@ static bool submit_upstream_work(CURL *curl, struct work *work)
 		adata_sz = data_size / sizeof(uint32_t);
 
 		/* build hex string */
-		for (i = 0; i < adata_sz; i++)
-			le32enc(&work->data[i], work->data[i]);
+		if (opt_algo != ALGO_M7M && opt_algo != ALGO_VELVET)
+			for (i = 0; i < adata_sz; i++)
+				le32enc(&work->data[i], work->data[i]);
 
 		gw_str = abin2hex((uchar*)work->data, data_size);
 
@@ -1620,8 +1629,13 @@ static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 				work->data[i] = swab32(work->data[i]);
 		}
 
-		work->data[20] = 0x80000000;
-		work->data[31] = 0x00000280;
+		if (opt_algo == ALGO_M7M) {
+			for (i = 0; i < 32; i++)
+				be32enc(&work->data[i], work->data[i]);
+		} else {
+			work->data[20] = 0x80000000;
+			work->data[31] = 0x00000280;
+		}
 
 		pthread_mutex_unlock(&sctx->work_lock);
 
@@ -1635,10 +1649,12 @@ static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 		switch (opt_algo) {
 			case ALGO_ARGON2:
 			case ALGO_DROP:
+			case ALGO_M7M:
 			case ALGO_SCRYPT:
 			case ALGO_SCRYPTJANE:
 			case ALGO_NEOSCRYPT:
 			case ALGO_PLUCK:
+			case ALGO_VELVET:
 			case ALGO_YESCRYPT:
 				work_set_target(work, sctx->job.diff / (65536.0 * opt_diff_factor));
 				break;
@@ -1935,9 +1951,11 @@ static void *miner_thread(void *userdata)
 			case ALGO_ARGON2:
 			case ALGO_DROP:
 			case ALGO_PLUCK:
+			case ALGO_VELVET:
 			case ALGO_YESCRYPT:
 				max64 = 0x1ff;
 				break;
+			case ALGO_BASTION:
 			case ALGO_LYRA2:
 			case ALGO_LYRA2REV2:
 				max64 = 0xffff;
@@ -1953,6 +1971,7 @@ static void *miner_thread(void *userdata)
 			case ALGO_X14:
 				max64 = 0x3ffff;
 				break;
+			case ALGO_M7M:
 			case ALGO_X15:
 			case ALGO_ZR5:
 				max64 = 0x1ffff;
@@ -2049,6 +2068,9 @@ static void *miner_thread(void *userdata)
 			rc = scanhash_neoscrypt(thr_id, &work, max_nonce, &hashes_done,
 				0x80000020 | (opt_nfactor << 8));
 			break;
+		case ALGO_M7M:
+			rc = scanhash_m7m(thr_id, &work, max_nonce, &hashes_done);
+			break;
 		case ALGO_NIST5:
 			rc = scanhash_nist5(thr_id, &work, max_nonce, &hashes_done);
 			break;
@@ -2087,6 +2109,9 @@ static void *miner_thread(void *userdata)
 			break;
 		case ALGO_S3:
 			rc = scanhash_s3(thr_id, &work, max_nonce, &hashes_done);
+			break;
+		case ALGO_VELVET:
+			rc = scanhash_velvet(thr_id, &work, max_nonce, &hashes_done);
 			break;
 		case ALGO_X11:
 			rc = scanhash_x11(thr_id, &work, max_nonce, &hashes_done);

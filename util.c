@@ -2124,6 +2124,9 @@ void print_hash_tests(void)
 	lyra2rev2_hash(&hash[0], &buf[0]);
 	printpfx("lyra2v2", hash);
 
+	m7mhash(&hash[0], &buf[0]);
+	printpfx("m7m", hash);
+
 	myriadhash(&hash[0], &buf[0]);
 	printpfx("myr-gr", hash);
 
@@ -2173,6 +2176,9 @@ void print_hash_tests(void)
 
 	s3hash(&hash[0], &buf[0]);
 	printpfx("s3", hash);
+
+	velvethash(&hash[0], &buf[0]);
+	printpfx("velvet", hash);
 
 	x11hash(&hash[0], &buf[0]);
 	printpfx("x11", hash);
